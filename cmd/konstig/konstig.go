@@ -8,6 +8,7 @@ import (
 	"math"
 	"math/rand"
 	"os"
+	"runtime"
 	"time"
 
 	"image"
@@ -18,7 +19,7 @@ import (
 
 var (
 	// Co-efficients for the strange attractor.
-	a, b, c, d float64
+	a, b, c, d, e, f, g, h float64
 	// Width and height of the output image.
 	width, height int
 	// Number of iterations to plot.
@@ -40,10 +41,14 @@ func init() {
 	rand.Seed(time.Now().UnixNano())
 
 	// Co-efficients.
-	flag.Float64Var(&a, "a", sign()*5*rand.Float64(), "a coefficient")
-	flag.Float64Var(&b, "b", sign()*5*rand.Float64(), "b coefficient")
-	flag.Float64Var(&c, "c", sign()*5*rand.Float64(), "c coefficient")
-	flag.Float64Var(&d, "d", sign()*5*rand.Float64(), "d coefficient")
+	flag.Float64Var(&a, "a", sign()*2*rand.Float64(), "a co-efficient")
+	flag.Float64Var(&b, "b", sign()*2*rand.Float64(), "b co-efficient")
+	flag.Float64Var(&c, "c", sign()*2*rand.Float64(), "c co-efficient")
+	flag.Float64Var(&d, "d", sign()*2*rand.Float64(), "d co-efficient")
+	flag.Float64Var(&e, "e", sign()*2*rand.Float64(), "e co-efficient")
+	flag.Float64Var(&f, "f", sign()*2*rand.Float64(), "f co-efficient")
+	flag.Float64Var(&g, "g", sign()*2*rand.Float64(), "g co-efficient")
+	flag.Float64Var(&h, "h1", sign()*2*rand.Float64(), "h co-efficient")
 
 	flag.Int64Var(&iterations, "i", 1000000, "iterations")
 
@@ -55,7 +60,7 @@ func init() {
 	flag.Float64Var(&p2, "p2", 2, "phase2")
 	flag.Float64Var(&p3, "p3", 4, "phase3")
 
-	flag.StringVar(&filename, "o", fmt.Sprintf("%f_%f_%f_%f.png", a, b, c, d), "output filename")
+	flag.StringVar(&filename, "o", fmt.Sprintf("%f_%f_%f_%f_%f_%f_%f_%f.png", a, b, c, d, e, f, g, h), "output filename")
 	/// Debug options.
 	// flag.StringVar(&filename, "o", "a.png", "output filename")
 	// fmt.Println(fmt.Sprintf("%f_%f_%f_%f.png", a, b, c, d))
@@ -67,6 +72,7 @@ func init() {
 }
 
 func main() {
+	runtime.GOMAXPROCS(runtime.NumCPU())
 	flag.Parse()
 	err := attractor()
 	if err != nil {
@@ -101,7 +107,8 @@ func attractor() (err error) {
 
 	// Output image with black background.
 	img := image.NewRGBA(image.Rect(0, 0, width, height))
-	black := color.RGBA{0, 0, 0, 255}
+	// black := color.RGBA{0, 0, 0, 255}
+	black := color.RGBA{255, 255, 255, 255}
 	draw.Draw(img, img.Bounds(), &image.Uniform{black}, image.ZP, draw.Src)
 
 	// Starting point. Arbitrary non-zero value. Because the sin function would
@@ -110,30 +117,64 @@ func attractor() (err error) {
 
 	var p image.Point
 	var i int64
-	for i = 0; i < iterations; i++ {
-		// Compute a new point using the trigonometric strange attractor
-		// equations.
-		xnew := math.Sin(y*b) + c*math.Sin(x*b)
-		ynew := math.Sin(x*a) + d*math.Sin(y*a)
+	for i = 0; i < 100; i++ {
+		xnew := a*math.Cos(y*b) + c*math.Cos(x*d)
+		ynew := e*math.Sin(x*f) + g*math.Sin(y*h)
 
 		// Save the new point.
 		x = xnew
 		y = ynew
+	}
+	pChan := make(chan image.Point, 10000)
+	go func() {
+		for i = 0; i < iterations; i++ {
+			// Compute a new point using the trigonometric strange attractor
+			// equations.
+			xnew := a*math.Cos(y*b) + c*math.Cos(x*d)
+			ynew := e*math.Sin(x*f) + g*math.Sin(y*h)
 
-		// Center the attractor both horizontally and vertically.
-		p.X = int(zoom*x) + width/2
-		p.Y = int(zoom*y) + height/2
+			// Save the new point.
+			x = xnew
+			y = ynew
 
-		// Draw the point.
-		setPt(p, img)
+			// Center the attractor both horizontally and vertically.
+			p.X = int(zoom*x) + width/2
+			p.Y = int(zoom*y) + height/2
+
+			pChan <- p
+		}
+		close(pChan)
+	}()
+	for p := range pChan {
+		setPt(&p, img)
+	}
+
+	if allBlack(img) {
+		fmt.Println(fmt.Sprintf("konstig -a %f -b %f -c %f -d %f -e %f -f %f -g %f -h1 %f -o a.png", a, b, c, d, e, f, g, h))
+		return nil
 	}
 	// Create the output image file.
 	return save(img)
 }
 
+func allBlack(i *image.RGBA) bool {
+	atLeast := width * height / 1000
+	num := 0
+	for x := 0; x < width; x++ {
+		for y := 0; y < height; y++ {
+			r, g, b, _ := i.At(x, y).RGBA()
+			if !isBlack(r, g, b) {
+				num++
+			}
+		}
+	}
+	fmt.Println(num, atLeast)
+	return num < atLeast
+}
+
 // setPt sets the point p to the color in the gradient relative to the distance
 // from origo.
-func setPt(p image.Point, img *image.RGBA) {
+func setPt(p *image.Point, img *image.RGBA) {
 	// Generate the current pixels color.
 	col := gradientIndex(dist(width/2, height/2, p.X, p.Y))
 
@@ -151,7 +192,7 @@ func setPt(p image.Point, img *image.RGBA) {
 
 // isBlack returns true if the color is black.
 func isBlack(r, g, b uint32) bool {
-	return r == 0 && g == 0 && b == 0
+	return uint8(r) == 255 && uint8(g) == 255 && uint8(b) == 255
 }
 
 // save creates an output image file.
@@ -168,7 +209,7 @@ func save(img *image.RGBA) (err error) {
 
 // sign randomly returns either 1 or -1.
 func sign() float64 {
-	a := rand.Intn(1)
+	a := rand.Intn(2)
 	if a == 0 {
 		return 1.0
 	}
@@ -183,7 +224,7 @@ func dist(cx, cy, x, y int) float64 {
 
 // gradientIndex returns the color at the index nearest c.
 func gradientIndex(c float64) color.RGBA {
-	return rainbow[int(c)]
+	return rainbow[int(c)%cap(rainbow)]
 }
 
 // add adds two colors together to make a brighter color.
